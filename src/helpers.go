@@ -2,12 +2,21 @@ package main
 
 import (
 	"encoding/gob"
-	"fmt"
+	"encoding/json"
 	"log"
+	"net/http"
 	"os"
 )
 
-func snapshot(kvStore map[string]interface{}) {
+func writeJSON(w http.ResponseWriter, status int, payload APIResponse) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(payload)
+}
+
+func snapshot(store *kvStore) {
+	store.mu.RLock()
+	defer store.mu.RUnlock()
 	file, err := os.Create("./snapshot.gob")
 	if err != nil {
 		log.Fatal(err)
@@ -15,27 +24,24 @@ func snapshot(kvStore map[string]interface{}) {
 	defer file.Close()
 
 	encoder := gob.NewEncoder(file)
-	err = encoder.Encode(kvStore)
+	err = encoder.Encode(store.data)
 	if err != nil {
 		log.Fatal(err)
 	}
 	log.Println("Snapshot saved successfully")
 }
 
-func getKVStore() map[string]interface{} {
-	kvStore := make(map[string]interface{})
+func loadSnapshot(store *kvStore) {
 	file, err := os.Open("./snapshot.gob")
-
-	if err != nil {
-		return kvStore
+	if os.IsNotExist(err) {
+		log.Println("No snapshot found, starting fresh")
+		return
 	}
 
 	decoder := gob.NewDecoder(file)
 	defer file.Close()
 
-	if err := decoder.Decode(&kvStore); err != nil {
-		fmt.Println(err)
+	if err := decoder.Decode(&store.data); err != nil {
+		log.Println(err)
 	}
-
-	return kvStore
 }

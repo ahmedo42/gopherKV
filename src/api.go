@@ -1,104 +1,86 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
+	"sync"
 )
+
+type kvStore struct {
+	data map[interface{}]interface{}
+	mu   sync.RWMutex
+}
 
 type APIResponse struct {
 	Message string      `json:"message,omitempty"`
 	Data    interface{} `json:"data,omitempty"`
 }
 
-func getHandler(kvStore map[string]interface{}) http.HandlerFunc {
+func getHandler(store *kvStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		key := r.URL.Query().Get("key")
-		val, ok := kvStore[key]
-		var response APIResponse
-		if !ok {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusNotFound)
-			response.Message = fmt.Sprintf("no such key: '%s'", key)
 
-			json.NewEncoder(w).Encode(response)
+		store.mu.RLock()
+		defer store.mu.RUnlock()
+		val, ok := store.data[key]
+		if !ok {
+			writeJSON(w, http.StatusNotFound, APIResponse{Message: "no such key"})
 			return
 		}
 
-		data := map[string]interface{}{
+		data := map[interface{}]interface{}{
 			"key":   key,
 			"value": val,
 		}
-		response.Message = "success"
-		response.Data = data
+		fmt.Println(data)
 
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-
-		json.NewEncoder(w).Encode(response)
+		writeJSON(w, http.StatusOK, APIResponse{Message: "success", Data: data})
 	}
 }
 
-func putHandler(kvStore map[string]interface{}) http.HandlerFunc {
+func putHandler(store *kvStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		key := r.URL.Query().Get("key")
 		val := r.URL.Query().Get("value")
 
-		if key == "" || val == "" {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusBadRequest)
-			response := APIResponse{
-				Message: "key and value must not be empty",
-			}
-			json.NewEncoder(w).Encode(response)
+		if key == "" {
+			writeJSON(w, http.StatusBadRequest, APIResponse{Message: "Empty Key"})
 			return
 		}
-
-		kvStore[key] = val
+		store.mu.Lock()
+		defer store.mu.Unlock()
+		store.data[key] = val
 		response := APIResponse{
 			Message: "success",
-			Data: map[string]interface{}{
+			Data: map[interface{}]interface{}{
 				"key":   key,
 				"value": val,
 			},
 		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(response)
+		writeJSON(w, http.StatusOK, response)
 	}
 }
 
-func deleteHandler(kvStore map[string]interface{}) http.HandlerFunc {
+func deleteHandler(store *kvStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		key := r.URL.Query().Get("key")
 
 		if key == "" {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusBadRequest)
-			response := APIResponse{
-				Message: "key must not be empty",
-			}
-			json.NewEncoder(w).Encode(response)
+			writeJSON(w, http.StatusBadRequest, APIResponse{Message: "Empty Key"})
 			return
 		}
 
-		_, ok := kvStore[key]
-		var response APIResponse
+		store.mu.Lock()
+		defer store.mu.Unlock()
+		_, ok := store.data[key]
 		if !ok {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusNotFound)
-			response.Message = fmt.Sprintf("no such key: '%s'", key)
-			json.NewEncoder(w).Encode(response)
+			writeJSON(w, http.StatusNotFound, APIResponse{Message: "no such key"})
 			return
 		}
 
-		delete(kvStore, key)
-		response.Message = "success"
-		response.Data = nil
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(response)
+		store.mu.Lock()
+		defer store.mu.Unlock()
+		delete(store.data, key)
+		writeJSON(w, http.StatusOK, APIResponse{Message: "success"})
 	}
 }

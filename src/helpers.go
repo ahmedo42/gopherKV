@@ -32,6 +32,8 @@ func snapshot(store *kvStore) {
 }
 
 func loadSnapshot(store *kvStore) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
 	file, err := os.Open("./snapshot.gob")
 	if os.IsNotExist(err) {
 		log.Println("No snapshot found, starting fresh")

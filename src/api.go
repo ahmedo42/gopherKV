@@ -1,13 +1,15 @@
 package main
 
 import (
-	"fmt"
+	"encoding/json"
 	"net/http"
 	"sync"
+
+	"github.com/gorilla/mux"
 )
 
 type kvStore struct {
-	data map[interface{}]interface{}
+	data map[string]interface{}
 	mu   sync.RWMutex
 }
 
@@ -16,9 +18,13 @@ type APIResponse struct {
 	Data    interface{} `json:"data,omitempty"`
 }
 
+type ValueRequest struct {
+	Value interface{} `json:"value"`
+}
+
 func getHandler(store *kvStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		key := r.URL.Query().Get("key")
+		key := mux.Vars(r)["key"]
 
 		store.mu.RLock()
 		defer store.mu.RUnlock()
@@ -28,11 +34,10 @@ func getHandler(store *kvStore) http.HandlerFunc {
 			return
 		}
 
-		data := map[interface{}]interface{}{
+		data := map[string]interface{}{
 			"key":   key,
 			"value": val,
 		}
-		fmt.Println(data)
 
 		writeJSON(w, http.StatusOK, APIResponse{Message: "success", Data: data})
 	}
@@ -40,21 +45,28 @@ func getHandler(store *kvStore) http.HandlerFunc {
 
 func putHandler(store *kvStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		key := r.URL.Query().Get("key")
-		val := r.URL.Query().Get("value")
+		key := mux.Vars(r)["key"]
 
 		if key == "" {
 			writeJSON(w, http.StatusBadRequest, APIResponse{Message: "Empty Key"})
 			return
 		}
+
+		var req ValueRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, APIResponse{Message: "Invalid JSON"})
+			return
+		}
+
 		store.mu.Lock()
 		defer store.mu.Unlock()
-		store.data[key] = val
+		store.data[key] = req.Value
+
 		response := APIResponse{
 			Message: "success",
-			Data: map[interface{}]interface{}{
+			Data: map[string]interface{}{
 				"key":   key,
-				"value": val,
+				"value": req.Value,
 			},
 		}
 		writeJSON(w, http.StatusOK, response)
@@ -63,7 +75,7 @@ func putHandler(store *kvStore) http.HandlerFunc {
 
 func deleteHandler(store *kvStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		key := r.URL.Query().Get("key")
+		key := mux.Vars(r)["key"]
 
 		if key == "" {
 			writeJSON(w, http.StatusBadRequest, APIResponse{Message: "Empty Key"})
@@ -78,8 +90,6 @@ func deleteHandler(store *kvStore) http.HandlerFunc {
 			return
 		}
 
-		store.mu.Lock()
-		defer store.mu.Unlock()
 		delete(store.data, key)
 		writeJSON(w, http.StatusOK, APIResponse{Message: "success"})
 	}

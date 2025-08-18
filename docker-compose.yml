@@ -1,0 +1,14 @@
+services:
+  go-app:
+    build: .
+    container_name: go-app-container
+    ports:
+      - "8080:8080"
+    restart: always
+    volumes:
+      - .:/app
+      - go-data:/root 
+
+  
+volumes:
+  go-data:

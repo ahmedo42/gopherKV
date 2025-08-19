@@ -14,10 +14,17 @@ func writeJSON(w http.ResponseWriter, status int, payload APIResponse) {
 	json.NewEncoder(w).Encode(payload)
 }
 
-func snapshot(store *kvStore) {
+func getEnv(key, fallback string) string {
+	if value, ok := os.LookupEnv(key); ok {
+		return value
+	}
+	return fallback
+}
+
+func snapshot(store *kvStore, snapshotPath string) {
 	store.mu.RLock()
 	defer store.mu.RUnlock()
-	file, err := os.Create("./snapshot.gob")
+	file, err := os.Create(snapshotPath)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -31,10 +38,10 @@ func snapshot(store *kvStore) {
 	log.Println("Snapshot saved successfully")
 }
 
-func loadSnapshot(store *kvStore) {
+func loadSnapshot(store *kvStore, snapshotPath string) {
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	file, err := os.Open("./snapshot.gob")
+	file, err := os.Open(snapshotPath)
 	if os.IsNotExist(err) {
 		log.Println("No snapshot found, starting fresh")
 		return

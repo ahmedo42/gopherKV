@@ -7,8 +7,7 @@ services:
     restart: always
     volumes:
       - .:/app
-      - go-data:/root 
-
-  
-volumes:
-  go-data:
+      - ./snapshots:/data
+    environment:
+      - SNAPSHOT_PATH=/data
+      - PORT=8080

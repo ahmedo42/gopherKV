@@ -1,13 +1,30 @@
-services:
-  go-app:
+ services:
+  go-app-leader:
     build: .
-    container_name: go-app-container
     ports:
       - "8080:8080"
     restart: always
     volumes:
       - .:/app
       - ./snapshots:/data
+      - /var/run/docker.sock:/var/run/docker.sock
     environment:
       - SNAPSHOT_PATH=/data
-      - PORT=8080
+      - ADDR=0.0.0.0:8080
+      - ROLE=leader
+
+  go-app-follower:
+    build: .
+    restart: always
+    volumes:
+      - .:/app
+      - ./snapshots:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - SNAPSHOT_PATH=/data
+      - ADDR=0.0.0.0:8080
+      - ROLE=follower
+      - LEADER=go-app-leader:8080
+      - SERVICE_NAME=go-app-follower
+    deploy:
+      replicas: 3

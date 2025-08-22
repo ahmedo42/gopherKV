@@ -13,11 +13,35 @@ import (
 	"github.com/gorilla/mux"
 )
 
+type nodeConfig struct {
+	SelfAddr   string
+	LeaderAddr string
+	Peers      []string
+}
+
 func main() {
 
 	snapshotPath := flag.String("path", getEnv("SNAPSHOT_PATH", "./"), "path to the directory containing the periodic snapshot")
-	srvPort := flag.String("port", getEnv("PORT", "8080"), "where the API will be served")
+	addrFlag := flag.String("addr", getEnv("ADDR", "0.0.0.0:8080"), "this node's host:port")
+	leaderFlag := flag.String("leader", getEnv("LEADER", "0.0.0.0:8080"), "leader host:port")
 	flag.Parse()
+
+	cfg := nodeConfig{
+		SelfAddr:   *addrFlag,
+		LeaderAddr: *leaderFlag,
+	}
+	role := os.Getenv("ROLE")
+	serviceName := os.Getenv("SERVICE_NAME")
+
+	if role == "follower" {
+		peers, err := discoverPeers(serviceName)
+		if err != nil {
+			log.Printf("Failed to discover peers: %v", err)
+		} else {
+			log.Printf("Discovered peers: %v", peers)
+			cfg.Peers = peers
+		}
+	}
 
 	if err := os.MkdirAll(*snapshotPath, 0755); err != nil {
 		log.Fatalf("Failed to create snapshot directory %s: %v", *snapshotPath, err)
@@ -30,9 +54,22 @@ func main() {
 	loadSnapshot(store, savePath)
 
 	router := mux.NewRouter()
-	router.HandleFunc("/put/{key}", putHandler(store)).Methods("PUT")
+	router.HandleFunc("/put/{key}", func(w http.ResponseWriter, r *http.Request) {
+		if !isLeader(cfg) {
+			forwardToLeader(cfg, w, r)
+			return
+		}
+		putHandler(store, cfg)(w, r)
+	}).Methods("PUT")
 	router.HandleFunc("/get/{key}", getHandler(store)).Methods("GET")
-	router.HandleFunc("/delete/{key}", deleteHandler(store)).Methods("DELETE")
+	router.HandleFunc("/delete/{key}", func(w http.ResponseWriter, r *http.Request) {
+		if !isLeader(cfg) {
+			forwardToLeader(cfg, w, r)
+			return
+		}
+		deleteHandler(store, cfg)(w, r)
+	}).Methods("DELETE")
+	router.HandleFunc("/replicate", replicateHandler(store)).Methods("POST")
 
 	ticker := time.NewTicker(1 * time.Minute)
 
@@ -40,7 +77,7 @@ func main() {
 	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
 
 	srv := &http.Server{
-		Addr:         ":" + *srvPort,
+		Addr:         cfg.SelfAddr,
 		Handler:      router,
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 10 * time.Second,
@@ -67,7 +104,7 @@ func main() {
 		}
 	}()
 
-	log.Println("Server started on port", *srvPort)
+	log.Println("Server started on port", cfg.SelfAddr)
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("Server error: %v", err)
 	}
